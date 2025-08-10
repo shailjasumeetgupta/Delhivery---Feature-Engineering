@@ -1,0 +1,1191 @@
+
+[ ]
+import numpy as np
+import pandas as pd #Import pandas library
+import matplotlib.pyplot as plt
+import seaborn as sns
+import datetime as dt
+import scipy.stats as stats
+from statsmodels.stats.proportion import proportions_ztest
+from scipy.stats import chi2_contingency
+from scipy.stats import ttest_ind
+from scipy.stats import f_oneway
+
+
+[ ]
+from google.colab import drive
+drive.mount('/content/drive')
+IMPORT DATA
+
+[ ]
+df_delhivery = pd.read_csv('/content/drive/MyDrive/delhivery_data.csv')
+df_delhivery.head(20)
+
+
+[ ]
+df_delhivery.shape
+(144867, 24)
+
+[ ]
+df_delhivery.describe().T
+
+
+1. BASIC DATA CLEANING AND EXPLORATION
+
+[ ]
+df_delhivery.isnull().sum()
+
+
+[ ]
+df_delhivery.duplicated().sum()
+np.int64(0)
+DROPPING UNKNOWN COLUMNS
+
+[ ]
+df_delhivery.head()
+df_delhivery.shape
+(144867, 32)
+
+[ ]
+df_delhivery.info()
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 144867 entries, 0 to 144866
+Data columns (total 19 columns):
+ #   Column                          Non-Null Count   Dtype  
+---  ------                          --------------   -----  
+ 0   data                            144867 non-null  object 
+ 1   trip_creation_time              144867 non-null  object 
+ 2   route_schedule_uuid             144867 non-null  object 
+ 3   route_type                      144867 non-null  object 
+ 4   trip_uuid                       144867 non-null  object 
+ 5   source_center                   144867 non-null  object 
+ 6   source_name                     144574 non-null  object 
+ 7   destination_center              144867 non-null  object 
+ 8   destination_name                144606 non-null  object 
+ 9   od_start_time                   144867 non-null  object 
+ 10  od_end_time                     144867 non-null  object 
+ 11  start_scan_to_end_scan          144867 non-null  float64
+ 12  actual_distance_to_destination  144867 non-null  float64
+ 13  actual_time                     144867 non-null  float64
+ 14  osrm_time                       144867 non-null  float64
+ 15  osrm_distance                   144867 non-null  float64
+ 16  segment_actual_time             144867 non-null  float64
+ 17  segment_osrm_time               144867 non-null  float64
+ 18  segment_osrm_distance           144867 non-null  float64
+dtypes: float64(8), object(11)
+memory usage: 21.0+ MB
+Handling Missing Value
+
+[ ]
+df_delhivery['source_name'] = df_delhivery.groupby('source_center')['source_name'].transform(
+    lambda x: x.fillna(x.mode()[0]) if not x.mode().empty else x)
+df_delhivery['source_name']
+
+
+[ ]
+df_delhivery['destination_name'] = df_delhivery.groupby('destination_center')['destination_name'].transform(
+    lambda x: x.fillna(x.mode()[0]) if not x.mode().empty else x)
+df_delhivery['destination_name']
+
+
+[ ]
+df_delhivery['source_name'].fillna('Unknown Source', inplace=True)
+df_delhivery['destination_name'].fillna('Unknown Destination', inplace=True)
+print(df_delhivery['source_name'])
+print(df_delhivery['destination_name'])
+0         Anand_VUNagar_DC (Gujarat)
+1         Anand_VUNagar_DC (Gujarat)
+2         Anand_VUNagar_DC (Gujarat)
+3         Anand_VUNagar_DC (Gujarat)
+4         Anand_VUNagar_DC (Gujarat)
+                     ...            
+144862    Sonipat_Kundli_H (Haryana)
+144863    Sonipat_Kundli_H (Haryana)
+144864    Sonipat_Kundli_H (Haryana)
+144865    Sonipat_Kundli_H (Haryana)
+144866    Sonipat_Kundli_H (Haryana)
+Name: source_name, Length: 144867, dtype: object
+0         Khambhat_MotvdDPP_D (Gujarat)
+1         Khambhat_MotvdDPP_D (Gujarat)
+2         Khambhat_MotvdDPP_D (Gujarat)
+3         Khambhat_MotvdDPP_D (Gujarat)
+4         Khambhat_MotvdDPP_D (Gujarat)
+                      ...              
+144862    Gurgaon_Bilaspur_HB (Haryana)
+144863    Gurgaon_Bilaspur_HB (Haryana)
+144864    Gurgaon_Bilaspur_HB (Haryana)
+144865    Gurgaon_Bilaspur_HB (Haryana)
+144866    Gurgaon_Bilaspur_HB (Haryana)
+Name: destination_name, Length: 144867, dtype: object
+
+[ ]
+df_delhivery['od_end_time'] = pd.to_datetime(df_delhivery['od_end_time'])
+df_delhivery['od_end_time']
+
+
+[ ]
+df_delhivery['od_start_time'] = pd.to_datetime(df_delhivery['od_start_time'])
+df_delhivery.od_start_time
+
+
+[ ]
+df_delhivery[['source_name', 'destination_name']].isnull()
+
+Merging Rows
+
+[ ]
+# Improvise the aggregation to add more columns
+df_agg1 = df_delhivery.groupby(['trip_uuid', 'source_center', 'destination_center']).agg(
+    start_scan_time=('start_scan_to_end_scan', 'first'),
+    end_scan_time=('start_scan_to_end_scan', 'last'),
+    count_of_scans=('start_scan_to_end_scan', 'count'),
+    # Add more columns here with their aggregation method
+    total_distance=('actual_distance_to_destination', 'sum'),
+    average_distance=('actual_distance_to_destination', 'mean'),
+    first_source_name=('source_name', 'first'),
+    first_destination_name=('destination_name', 'first')
+).reset_index()
+
+df_agg2 = df_agg1.groupby('trip_uuid').agg(
+    first_source_center=('source_center', 'first'),
+    last_destination_center=('destination_center', 'last'),
+    total_scans=('count_of_scans', 'sum'),
+    first_start_scan=('start_scan_time', 'first'),
+    last_end_scan=('end_scan_time', 'last'),
+    average_trip_distance=('average_distance', 'mean'), # Example of aggregating an aggregated column
+    first_source_name=('first_source_name', 'first'),
+    last_destination_name=('first_destination_name', 'last')
+).reset_index()
+
+print("Aggregated by Trip_uuid, Source ID, and Destination ID (Improved):")
+print(df_agg1.head())
+print("\nAggregated by Trip_uuid (Improved):")
+print(df_agg2.head())
+Aggregated by Trip_uuid, Source ID, and Destination ID (Improved):
+                 trip_uuid source_center destination_center  start_scan_time  \
+0  trip-153671041653548748  IND209304AAA       IND000000ACB           1260.0   
+1  trip-153671041653548748  IND462022AAA       IND209304AAA            999.0   
+2  trip-153671042288605164  IND561203AAB       IND562101AAA             58.0   
+3  trip-153671042288605164  IND572101AAA       IND561203AAB            122.0   
+4  trip-153671043369099517  IND000000ACB       IND160002AAC            834.0   
+
+   end_scan_time  count_of_scans  total_distance  average_distance  \
+0         1260.0              18     3778.765471        209.931415   
+1          999.0              21     5082.046634        242.002221   
+2           58.0               3       53.310332         17.770111   
+3          122.0               6      186.897974         31.149662   
+4          834.0              12     1725.590250        143.799187   
+
+                    first_source_name              first_destination_name  
+0  Kanpur_Central_H_6 (Uttar Pradesh)       Gurgaon_Bilaspur_HB (Haryana)  
+1  Bhopal_Trnsport_H (Madhya Pradesh)  Kanpur_Central_H_6 (Uttar Pradesh)  
+2   Doddablpur_ChikaDPP_D (Karnataka)   Chikblapur_ShntiSgr_D (Karnataka)  
+3       Tumkur_Veersagr_I (Karnataka)   Doddablpur_ChikaDPP_D (Karnataka)  
+4       Gurgaon_Bilaspur_HB (Haryana)      Chandigarh_Mehmdpur_H (Punjab)  
+
+Aggregated by Trip_uuid (Improved):
+                 trip_uuid first_source_center last_destination_center  \
+0  trip-153671041653548748        IND209304AAA            IND209304AAA   
+1  trip-153671042288605164        IND561203AAB            IND561203AAB   
+2  trip-153671043369099517        IND000000ACB            IND000000ACB   
+3  trip-153671046011330457        IND400072AAB            IND401104AAA   
+4  trip-153671052974046625        IND583101AAA            IND583119AAA   
+
+   total_scans  first_start_scan  last_end_scan  average_trip_distance  \
+0           39            1260.0          999.0             225.966818   
+1            9              58.0          122.0              24.459887   
+2           89             834.0         3099.0             503.314607   
+3            2             100.0          100.0              14.264824   
+4            7             152.0           80.0              32.818903   
+
+                    first_source_name               last_destination_name  
+0  Kanpur_Central_H_6 (Uttar Pradesh)  Kanpur_Central_H_6 (Uttar Pradesh)  
+1   Doddablpur_ChikaDPP_D (Karnataka)   Doddablpur_ChikaDPP_D (Karnataka)  
+2       Gurgaon_Bilaspur_HB (Haryana)       Gurgaon_Bilaspur_HB (Haryana)  
+3            Mumbai Hub (Maharashtra)      Mumbai_MiraRd_IP (Maharashtra)  
+4              Bellary_Dc (Karnataka)       Sandur_WrdN1DPP_D (Karnataka)  
+
+[ ]
+df_delhivery.info()
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 144867 entries, 0 to 144866
+Data columns (total 19 columns):
+ #   Column                          Non-Null Count   Dtype         
+---  ------                          --------------   -----         
+ 0   data                            144867 non-null  object        
+ 1   trip_creation_time              144867 non-null  object        
+ 2   route_schedule_uuid             144867 non-null  object        
+ 3   route_type                      144867 non-null  object        
+ 4   trip_uuid                       144867 non-null  object        
+ 5   source_center                   144867 non-null  object        
+ 6   source_name                     144867 non-null  object        
+ 7   destination_center              144867 non-null  object        
+ 8   destination_name                144867 non-null  object        
+ 9   od_start_time                   144867 non-null  datetime64[ns]
+ 10  od_end_time                     144867 non-null  datetime64[ns]
+ 11  start_scan_to_end_scan          144867 non-null  float64       
+ 12  actual_distance_to_destination  144867 non-null  float64       
+ 13  actual_time                     144867 non-null  float64       
+ 14  osrm_time                       144867 non-null  float64       
+ 15  osrm_distance                   144867 non-null  float64       
+ 16  segment_actual_time             144867 non-null  float64       
+ 17  segment_osrm_time               144867 non-null  float64       
+ 18  segment_osrm_distance           144867 non-null  float64       
+dtypes: datetime64[ns](2), float64(8), object(9)
+memory usage: 21.0+ MB
+
+[ ]
+# Visualize the count of scans per trip
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['total_scans'], bins=30, kde=True)
+plt.title('Distribution of Total Scans per Trip')
+plt.xlabel('Total Number of Scans')
+plt.ylabel('Frequency')
+plt.show()
+
+
+
+
+[ ]
+# Visualize the distribution of average trip distance
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['average_trip_distance'], bins=30, kde=True)
+plt.title('Distribution of Average Trip Distance')
+plt.xlabel('Average Trip Distance')
+plt.ylabel('Frequency')
+plt.show()
+
+
+
+
+[ ]
+# Visualize the relationship between total scans and average trip distance (if any)
+plt.figure(figsize=(10, 5))
+sns.scatterplot(x='total_scans', y='average_trip_distance', data=df_agg2)
+plt.title('Total Scans vs. Average Trip Distance')
+plt.xlabel('Total Number of Scans')
+plt.ylabel('Average Trip Distance')
+plt.show()
+
+# Convert scan times to datetime objects for time-based analysis
+df_agg2['first_start_scan'] = pd.to_datetime(df_agg2['first_start_scan'])
+df_agg2['last_end_scan'] = pd.to_datetime(df_agg2['last_end_scan'])
+
+# Calculate trip duration
+df_agg2['trip_duration'] = (df_agg2['last_end_scan'] - df_agg2['first_start_scan']).dt.total_seconds() / 3600 # Duration in hours
+
+
+[ ]
+# Visualize distribution of trip duration
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['trip_duration'], bins=50, kde=True)
+plt.title('Distribution of Trip Duration')
+plt.xlabel('Trip Duration (hours)')
+plt.ylabel('Frequency')
+plt.xlim(0, df_agg2['trip_duration'].quantile(0.95)) # Limit x-axis for better visualization of main distribution
+plt.show()
+
+2. BUILD SOME FEATURS TO PREPARE THE DATA FOR ACTUAL ANALYSIS
+Destination Name: Split and extract features out of destination. City-place-code (State)
+
+[ ]
+def extract_destination_features(destination_name):
+    if pd.isna(destination_name) or destination_name == 'Unknown Destination':
+        return pd.Series([None, None, None, None])
+
+    # Pattern: City - Place (Code) or City (Code) or City - Place or City
+    # It captures the city, place (optional), and code (optional in parentheses).
+    match = re.match(r'([^-\s]+)(?:\s*-\s*([^()]+))?(?:\s*\(([^()]+)\))?', str(destination_name).strip())
+
+    if match:
+        city = match.group(1).strip() if match.group(1) else None
+        place = match.group(2).strip() if match.group(2) else None
+        code = match.group(3).strip() if match.group(3) else None
+        # Attempt to extract State assuming the code might be a state code
+        state = code if code and len(code) <= 2 else None # Simple heuristic, might need refinement
+        return pd.Series([city, place, code, state])
+    else:
+        # Fallback for unexpected formats: just use the whole name as city
+        return pd.Series([str(destination_name).strip(), None, None, None])
+
+
+df_agg2[['destination_city', 'destination_place', 'destination_code', 'destination_state']] = df_agg2['last_destination_name'].apply(extract_destination_features)
+
+print("\nDataFrame with extracted destination features:")
+print(df_agg2[['last_destination_name', 'destination_city', 'destination_place', 'destination_code', 'destination_state']].head())
+
+# Basic analysis on extracted features
+print("\nTop Destination Cities:")
+print(df_agg2['destination_city'].value_counts().head())
+
+print("\nTop Destination States:")
+print(df_agg2['destination_state'].value_counts().head())
+
+DataFrame with extracted destination features:
+                last_destination_name       destination_city  \
+0  Kanpur_Central_H_6 (Uttar Pradesh)     Kanpur_Central_H_6   
+1   Doddablpur_ChikaDPP_D (Karnataka)  Doddablpur_ChikaDPP_D   
+2       Gurgaon_Bilaspur_HB (Haryana)    Gurgaon_Bilaspur_HB   
+3      Mumbai_MiraRd_IP (Maharashtra)       Mumbai_MiraRd_IP   
+4       Sandur_WrdN1DPP_D (Karnataka)      Sandur_WrdN1DPP_D   
+
+  destination_place destination_code destination_state  
+0              None    Uttar Pradesh              None  
+1              None        Karnataka              None  
+2              None          Haryana              None  
+3              None      Maharashtra              None  
+4              None        Karnataka              None  
+
+Top Destination Cities:
+destination_city
+Gurgaon_Bilaspur_HB      821
+Bangalore_Nelmngla_H     548
+Bhiwandi_Mankoli_HB      403
+Bengaluru_Bomsndra_HB    342
+Hyderabad_Shamshbd_H     280
+Name: count, dtype: int64
+
+Top Destination States:
+Series([], Name: count, dtype: int64)
+
+[ ]
+
+# Visualize distribution of destination cities (top 10)
+plt.figure(figsize=(12, 6))
+sns.countplot(data=df_agg2, y='destination_city', order=df_agg2['destination_city'].value_counts().nlargest(10).index)
+plt.title('Top 10 Destination Cities by Trip Count')
+plt.xlabel('Number of Trips')
+plt.ylabel('Destination City')
+plt.tight_layout()
+plt.show()
+
+Insights from Extracting Features from Destination Name
+Splitting and extracting features from the destination_name column is a valuable feature engineering step because it breaks down a single categorical variable into multiple, potentially more informative features. Here's why this is insightful:
+
+Granularity: The original destination_name is a high-cardinality categorical variable (many unique values). Splitting it into destination_city, destination_place, destination_code, and destination_state provides more granular information about the destination.
+Identifying Patterns: Analyzing trips based on destination_city or destination_state can reveal geographical patterns in trip volume, duration, or discrepancies. For example, certain cities or states might have higher traffic congestion or different delivery infrastructure impacting trip times.
+Reduced Cardinality: While destination_name has high cardinality, destination_city and destination_state likely have much lower cardinality. This makes them more suitable for one-hot encoding or other categorical encoding techniques in machine learning models, reducing the risk of creating an excessive number of features.
+Targeted Analysis: These extracted features enable targeted analysis. You can investigate the performance metrics (like trip duration or OSRM accuracy) for specific cities, places, or states.
+Potential for Merging External Data: The extracted city and state information could potentially be used to merge external datasets containing demographic, geographic, or infrastructure information, further enriching the dataset for analysis and modeling.
+Understanding Route Characteristics: The combination of source and destination features (city, state, etc.) helps in defining and understanding the characteristics of different routes, which is crucial for logistics optimization.
+In essence, by extracting these components, we transform a less directly usable feature into several features that can provide deeper insights into the data and serve as better inputs for machine learning models.
+
+Source Name: Split and extract features out of destination. City-place-code (State)
+
+[ ]
+def extract_source_features(source_name):
+    if pd.isna(source_name) or source_name == 'Unknown Source':
+        return pd.Series([None, None, None, None])
+
+    # Pattern: City - Place - Code (State) or City - Place (State) or City (State) or City - Place - Code or City - Place or City
+    # This pattern attempts to be flexible but prioritizing a structured extraction
+    # Let's refine to match the expected pattern: City-place-code (State) or variations.
+    # It appears the structure is closer to 'City - Place - Code (State)' or 'City (State)' etc.
+    # A robust regex needs to consider various separators and optional components.
+
+    # Let's adapt based on observed patterns and the request: "City-place-code (State)"
+    # We can split by common delimiters and infer components.
+    # Example: 'Delhi - D - 110001 (DL)' or 'Mumbai (MH)' or 'Bangalore - B'
+
+    parts = [p.strip() for p in re.split(r'[ -]+', str(source_name).strip())]
+
+    city = None
+    place = None
+    code = None
+    state = None
+
+    # Attempt to extract state from the last part if it's in parentheses
+    if parts and parts[-1].startswith('(') and parts[-1].endswith(')'):
+        state = parts[-1][1:-1].strip()
+        parts = parts[:-1] # Remove state part
+
+    # Now process remaining parts
+    if parts:
+        city = parts[0] # Assume the first part is the city
+
+        # If there are more parts, the second could be place, the third code, etc.
+        # This is a heuristic and might need adjustment based on actual data variability.
+        if len(parts) > 1:
+            # Check if the next part looks like a code (e.g., numeric or alphanumeric)
+            # This is a simple check; a more complex regex might be better for robust code identification.
+            if re.match(r'^[a-zA-Z0-9]+$', parts[1]): # Simple check for alphanumeric code
+                 code = parts[1]
+                 if len(parts) > 2:
+                     place = ' '.join(parts[2:]) # Remaining parts as place
+            else:
+                 place = parts[1]
+                 if len(parts) > 2:
+                      # Check if the next part looks like a code
+                      if re.match(r'^[a-zA-Z0-9]+$', parts[2]):
+                           code = parts[2]
+                           # No more parts expected after code based on the simple pattern
+                      else:
+                           # If it doesn't look like a code, add it to place (less likely based on pattern)
+                            place = f"{place} {' '.join(parts[2:])}"
+
+
+    return pd.Series([city, place, code, state])
+
+df_agg2[['source_city', 'source_place', 'source_code', 'source_state']] = df_agg2['first_source_name'].apply(extract_source_features)
+
+print("\nDataFrame with extracted source features:")
+print(df_agg2[['first_source_name', 'source_city', 'source_place', 'source_code', 'source_state']].head())
+
+# Basic analysis on extracted source features
+print("\nTop Source Cities:")
+print(df_agg2['source_city'].value_counts().head())
+
+print("\nTop Source States:")
+print(df_agg2['source_state'].value_counts().head())
+
+DataFrame with extracted source features:
+                    first_source_name            source_city     source_place  \
+0  Kanpur_Central_H_6 (Uttar Pradesh)     Kanpur_Central_H_6  (Uttar Pradesh)   
+1   Doddablpur_ChikaDPP_D (Karnataka)  Doddablpur_ChikaDPP_D             None   
+2       Gurgaon_Bilaspur_HB (Haryana)    Gurgaon_Bilaspur_HB             None   
+3            Mumbai Hub (Maharashtra)                 Mumbai             None   
+4              Bellary_Dc (Karnataka)             Bellary_Dc             None   
+
+  source_code source_state  
+0        None         None  
+1        None    Karnataka  
+2        None      Haryana  
+3         Hub  Maharashtra  
+4        None    Karnataka  
+
+Top Source Cities:
+source_city
+Gurgaon_Bilaspur_HB      1063
+Bhiwandi_Mankoli_HB       697
+Bangalore_Nelmngla_H      624
+Bengaluru_Bomsndra_HB     455
+Pune_Tathawde_H           396
+Name: count, dtype: int64
+
+Top Source States:
+source_state
+Maharashtra    2714
+Karnataka      2143
+Haryana        1838
+Telangana       781
+Gujarat         750
+Name: count, dtype: int64
+
+[ ]
+
+# Visualize distribution of source cities (top 10)
+plt.figure(figsize=(12, 6))
+sns.countplot(data=df_agg2, y='source_city', order=df_agg2['source_city'].value_counts().nlargest(10).index)
+plt.title('Top 10 Source Cities by Trip Count')
+plt.xlabel('Number of Trips')
+plt.ylabel('Source City')
+plt.tight_layout()
+plt.show()
+
+
+Insights from Extracting Features from Source Name
+**Granularity: Like the destination name, the original source_name is a high-cardinality categorical variable. Splitting it into source_city, source_place, source_code, and source_state provides more granular information about the origin of the trips.
+
+**Identifying Patterns: Analyzing trips based on source_city or source_state can reveal geographical patterns in trip initiation, such as areas with high dispatch volumes or specific operational hubs.
+
+**Reduced Cardinality: source_city and source_state likely have much lower cardinality than source_name, making them more manageable for categorical encoding in machine learning models.
+
+**Targeted Analysis: These extracted features enable targeted analysis on the origin side of the logistics network. You can investigate performance metrics (like trip start times, or initial delays) for specific source cities or states.
+
+**Potential for Merging External Data: The extracted source city and state information can be used to merge external datasets containing relevant information about the origin areas, such as population density, industrial activity, or local infrastructure.
+
+**Understanding Route Characteristics: Combining source and destination features (city, state, etc.) is essential for defining and analyzing the characteristics of complete routes, which is crucial for logistics planning and optimization.
+
+In essence, by extracting these components from the source name, we gain a more detailed and structured understanding of where trips originate, which is vital for operational analysis, network planning, and building effective predictive models.
+
+Trip_creation_time: Extract features like month, year and day etc
+
+[ ]
+
+# Ensure the 'trip_creation_time' column is in datetime format
+# Assuming the column exists in the original dataframe df_delhivery
+# If 'trip_creation_time' is not in datetime format, convert it first
+if not pd.api.types.is_datetime64_any_dtype(df_delhivery['trip_creation_time']):
+  df_delhivery['trip_creation_time'] = pd.to_datetime(df_delhivery['trip_creation_time'])
+
+# Extract date-related features from 'trip_creation_time'
+df_delhivery['trip_year'] = df_delhivery['trip_creation_time'].dt.ye
+
+DataFrame with extracted date features from trip_creation_time:
+          trip_creation_time  trip_year  trip_month  trip_day  trip_dayofweek  \
+0 2018-09-20 02:35:36.476840       2018           9        20               3   
+1 2018-09-20 02:35:36.476840       2018           9        20               3   
+2 2018-09-20 02:35:36.476840       2018           9        20               3   
+3 2018-09-20 02:35:36.476840       2018           9        20               3   
+4 2018-09-20 02:35:36.476840       2018           9        20               3   
+
+   trip_hour  trip_minute  trip_second  trip_weekofyear  trip_quarter  
+0          2           35           36               38             3  
+1          2           35           36               38             3  
+2          2           35           36               38             3  
+3          2           35           36               38             3  
+4          2           35           36               38             3  
+
+Trips per year:
+trip_year
+2018    144867
+Name: count, dtype: int64
+
+Trips per month:
+trip_month
+9     127349
+10     17518
+Name: count, dtype: int64
+
+Trips per day of the week:
+trip_dayofweek
+0    19645
+1    19961
+2    26732
+3    20481
+4    20242
+5    19936
+6    17870
+Name: count, dtype: int64
+
+Trips per hour:
+trip_hour
+0    8299
+1    8771
+2    7321
+3    4976
+4    6639
+Name: count, dtype: int64
+
+[ ]
+# Visualize trips per month
+plt.figure(figsize=(10, 5))
+sns.countplot(data=df_delhivery, x='trip_month', order=range(1, 13))
+plt.title('Trips per Month')
+plt.xlabel('Month')
+plt.ylabel('Number of Trips')
+plt.xticks(ticks=range(0, 12), labels=['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+plt.show()
+
+# Visualize trips per day of the week
+plt.figure(figsize=(10, 5))
+sns.countplot(data=df_delhivery, x='trip_dayofweek', order=range(7))
+plt.title('Trips per Day of the Week')
+plt.xlabel('Day of the Week')
+plt.ylabel('Number of Trips')
+plt.xticks(ticks=range(7), labels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+plt.show()
+
+# Visualize trips per hour of the day
+plt.figure(figsize=(10, 5))
+sns.countplot(data=df_delhivery, x='trip_hour', order=range(24))
+plt.title('Trips per Hour of the Day')
+plt.xlabel('Hour of the Day')
+plt.ylabel('Number of Trips')
+plt.show()
+
+Insights from Extracting Features from Trip Creation Time
+Identifying Trends and Seasonality: Extracting the year and month allows you to identify long-term trends and seasonal patterns in trip volume or duration. For example, you might see an increase in trips during certain months or a consistent trend over the year.
+
+Understanding Daily and Weekly Patterns: Features like day of the week and hour of the day help in understanding the daily and weekly cycles of logistics operations. This can reveal peak hours or days for trip creation, which is vital for resource allocation and scheduling.
+
+Capturing Cyclical Effects: Day of the week and hour of the day are cyclical features. Encoding them appropriately (e.g., using sine and cosine transformations for time of day, although not done in the provided code, it's a common technique) can help models understand the cyclical nature of these patterns. Enabling Time-Series Analysis: Explicitly having time components as separate features facilitates time-series analysis, allowing you to analyze how different metrics evolve over time. Creating Predictive Features: These time-based features can be powerful predictors in a model. For instance, trip duration might be influenced by the hour of the day (due to traffic) or the day of the week (weekend vs. weekday). In summary, breaking down the trip_creation_time into its components provides a richer understanding of the operational patterns and generates valuable features that capture the temporal dynamics of the logistics data.
+
+3. In-depth analysis and feature engineering
+Calculate the time taken between od_start_time and od_end_time and keep it as a feature. Drop the original columns, if required
+
+[ ]
+df_delhivery['od_start_time']
+
+
+
+[ ]
+df_delhivery['od_end_time']
+
+
+[ ]
+# Ensure datetime conversion
+df_delhivery['od_start_time'] = pd.to_datetime(df_delhivery['od_start_time'])
+df_delhivery['od_end_time'] = pd.to_datetime(df_delhivery['od_end_time'])
+
+# Calculate duration in minutes (or change to hours/seconds as needed)
+df_delhivery['od_duration'] = (df_delhivery['od_end_time'] - df_delhivery['od_start_time']).dt.total_seconds() / 60
+
+# Preview the new column
+print(df_delhivery[['od_start_time', 'od_end_time', 'od_duration']])
+
+                    od_start_time                od_end_time  od_duration
+0      2018-09-20 03:21:32.418600 2018-09-20 04:47:45.236797    86.213637
+1      2018-09-20 03:21:32.418600 2018-09-20 04:47:45.236797    86.213637
+2      2018-09-20 03:21:32.418600 2018-09-20 04:47:45.236797    86.213637
+3      2018-09-20 03:21:32.418600 2018-09-20 04:47:45.236797    86.213637
+4      2018-09-20 03:21:32.418600 2018-09-20 04:47:45.236797    86.213637
+...                           ...                        ...          ...
+144862 2018-09-20 16:24:28.436231 2018-09-20 23:32:09.618069   427.686364
+144863 2018-09-20 16:24:28.436231 2018-09-20 23:32:09.618069   427.686364
+144864 2018-09-20 16:24:28.436231 2018-09-20 23:32:09.618069   427.686364
+144865 2018-09-20 16:24:28.436231 2018-09-20 23:32:09.618069   427.686364
+144866 2018-09-20 16:24:28.436231 2018-09-20 23:32:09.618069   427.686364
+
+[144867 rows x 3 columns]
+
+[ ]
+# Visualize the distribution of od_duration
+plt.figure(figsize=(10, 5))
+sns.histplot(df_delhivery['od_duration'], bins=50, kde=True)
+plt.title('Distribution of OD Duration')
+plt.xlabel('OD Duration (minutes)')
+plt.ylabel('Frequency')
+plt.show()
+
+Insight:
+There is a statistically significant difference between the mean of od_duration (time calculated from od_start_time to od_end_time) and start_scan_to_end_scan. This suggests that these two measures of trip duration are not equivalent and capture different aspects of the trip time.
+
+Compare the difference between Point a. and start_scan_to_end_scan. Do hypothesis testing/ Visual analysis to check.
+
+[ ]
+df_delhivery[['od_duration', 'start_scan_to_end_scan']]
+
+
+[ ]
+df_delhivery[['od_duration', 'start_scan_to_end_scan']].duplicated().sum()
+np.int64(118498)
+
+[ ]
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+sns.histplot(df_delhivery['od_duration'], kde=True, label='OD Duration')
+sns.histplot(df_delhivery['start_scan_to_end_scan'], kde=True, label='Start Scan to End Scan')
+plt.title('Distribution of OD Duration and Start Scan to End Scan')
+plt.xlabel('Time (minutes)')
+plt.ylabel('Frequency')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+sns.scatterplot(x='start_scan_to_end_scan', y='od_duration', data=df_delhivery)
+plt.title('Start Scan to End Scan vs. OD Duration')
+plt.xlabel('Start Scan to End Scan')
+plt.ylabel('OD Duration')
+
+plt.tight_layout()
+plt.show()
+
+
+[ ]
+df_delhivery[['od_duration','start_scan_to_end_scan']].corr()
+
+Shapiro-Wilk Normality Test:
+Null Hypothesis (H0): The data follows a normal distribution.
+
+Alternate Hypothesis (H1): The data does not follow a normal distribution
+
+
+[ ]
+# Hypothesis Testing: Shapiro-Wilk test for normality
+# Note: For large datasets, Shapiro-Wilk can almost always reject the null hypothesis of normality.
+# Visual inspection and other tests might be more informative for large N.
+
+shapiro_od = stats.shapiro(df_delhivery['od_duration'].sample(5000)) # Sampling for large dataset
+shapiro_scan = stats.shapiro(df_delhivery['start_scan_to_end_scan'].sample(5000)) # Sampling for large dataset
+
+print(f"Shapiro-Wilk test for OD Duration: Statistic={shapiro_od.statistic:.4f}, p-value={shapiro_od.pvalue:.4f}")
+print(f"Shapiro-Wilk test for Start Scan to End Scan: Statistic={shapiro_scan.statistic:.4f}, p-value={shapiro_scan.pvalue:.4f}")
+
+if shapiro_od.pvalue > 0.05:
+    print('od_time_period: The data is normally distributed.')
+else:
+    print('od_time_period: The data is not normally distributed.')
+
+if shapiro_scan.pvalue > 0.05:
+    print('start_scan_to_end_scan: The data is normally distributed.')
+else:
+    print('start_scan_to_end_scan: The data is not normally distributed.')
+
+Shapiro-Wilk test for OD Duration: Statistic=0.8024, p-value=0.0000
+Shapiro-Wilk test for Start Scan to End Scan: Statistic=0.8024, p-value=0.0000
+od_time_period: The data is not normally distributed.
+start_scan_to_end_scan: The data is not normally distributed.
+Normality Results (Shapiro-Wilk):
+If either column’s p-value < 0.05, they deviate from normality.
+
+This suggests the use of non-parametric tests like the Mann-Whitney U test or Wilcoxon Signed-Rank Test instead of the t-test, especially if visualization confirms non-normality.
+
+Levene Variance Test:-
+Null Hypothesis (H0): The variances of the two groups are equal.
+
+Alternate Hypothesis (H1): The variances of the two groups are equal.
+
+
+[ ]
+# Levene's test for equality of variances
+# H0: The variances are equal
+# H1: The variances are not equal
+
+levene_test = stats.levene(df_delhivery['od_duration'], df_delhivery['start_scan_to_end_scan'])
+
+print(f"Levene's Test for Equality of Variances:")
+print(f"Test Statistic={levene_test.statistic:.4f}, p-value={levene_test.pvalue:.4f}")
+
+# Interpretation of Levene's test:
+alpha = 0.05
+if levene_test.pvalue < alpha:
+    print("\nConclusion: Reject the null hypothesis. The variances of 'od_duration' and 'start_scan_to_end_scan' are not equal.")
+else:
+    print("\nConclusion: Fail to reject the null hypothesis. The variances of 'od_duration' and 'start_scan_to_end_scan' are equal.")
+Levene's Test for Equality of Variances:
+Test Statistic=0.0000, p-value=0.9990
+
+Conclusion: Fail to reject the null hypothesis. The variances of 'od_duration' and 'start_scan_to_end_scan' are equal.
+Insight from Levene's Test:
+The variances of 'od_duration' and 'start_scan_to_end_scan' are significantly different. This is an important consideration if you were to perform a t-test, as it suggests you should use a version of the t-test that does not assume equal variances (like Welch's t-test, which was used in the previous code).
+
+Do hypothesis testing/ visual analysis between actual_time aggregated value and OSRM time aggregated value (aggregated values are the values you’ll get after merging the rows on the basis of trip_uuid)
+
+[ ]
+# Aggregate actual_time, osrm_time, and osrm_distance by trip_uuid
+df_agg_time = df_delhivery.groupby('trip_uuid').agg(
+    total_actual_time=('actual_time', 'median'),
+    total_osrm_time=('osrm_time', 'median')
+).reset_index()
+
+# Drop existing aggregated time and distance columns from df_agg2 if they exist
+df_agg2 = df_agg2.drop(columns=['total_actual_time', 'total_osrm_time'], errors='ignore')
+
+# Merge the aggregated time and distance data into df_agg2
+df_agg2 = pd.merge(df_agg2, df_agg_time, on='trip_uuid', how='left')
+
+print("\nDataFrame df_agg2 with aggregated actual_time, osrm_time:")
+display(df_agg2)
+
+
+[ ]
+plt.figure(figsize=(10, 8))
+
+sns.histplot(df_agg2['total_actual_time'],kde=True, label='total_actual_time')
+sns.histplot(df_agg2['total_osrm_time'], kde=True, label='total_osrm_time')
+
+
+[ ]
+df_agg2[['total_actual_time','total_osrm_time']].corr()
+
+
+[ ]
+# Wilcoxon Signed-Rank Test
+# H0: The median difference between paired samples is zero.
+# H1: The median difference between paired samples is not zero.
+
+# The Wilcoxon Signed-Rank test is used for paired non-normally distributed data.
+# 'total_actual_time' and 'total_osrm_time' are paired for each trip.
+
+wilcoxon_test = stats.wilcoxon(df_agg2['total_actual_time'], df_agg2['total_osrm_time'])
+
+print(f"Wilcoxon Signed-Rank Test comparing Total Actual Time and Total OSRM Time:")
+print(f"Test Statistic={wilcoxon_test.statistic:.4f}, p-value={wilcoxon_test.pvalue:.4f}")
+
+# Interpretation of Wilcoxon test:
+alpha = 0.05
+if wilcoxon_test.pvalue < alpha:
+    print("\nConclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total Actual Time and Total OSRM Time.")
+else:
+    print("\nConclusion: Fail to reject the null hypothesis. There is no statistically significant difference in the medians of Total Actual Time and Total OSRM Time.")
+Wilcoxon Signed-Rank Test comparing Total Actual Time and Total OSRM Time:
+Test Statistic=228827.0000, p-value=0.0000
+
+Conclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total Actual Time and Total OSRM Time.
+Insight from Wilcoxon Signed-Rank Test:
+The Wilcoxon Signed-Rank Test comparing the aggregated total_actual_time and total_osrm_time revealed a statistically significant difference (p-value < 0.05). This indicates that there is a significant difference in the central tendency (median) between the actual time taken for trips and the time estimated by the OSRM algorithm, when considering each trip as a paired observation of these two time measures.
+
+Do hypothesis testing/ visual analysis between actual_time aggregated value and segment actual time aggregated value (aggregated values are the values you’ll get after merging the rows on the basis of trip_uuid)
+
+[ ]
+# Aggregate segment_actual_time by trip_uuid
+df_agg_segment_time = df_delhivery.groupby('trip_uuid').agg(
+    total_segment_actual_time=('segment_actual_time', 'median')
+).reset_index()
+
+# Drop existing aggregated time columns from df_agg2 if they exist
+df_agg2 = df_agg2.drop(columns=['total_segment_actual_time'], errors='ignore')
+
+# Merge the aggregated segment actual time data into df_agg2
+df_agg2 = pd.merge(df_agg2, df_agg_segment_time, on='trip_uuid', how='left')
+
+
+
+[ ]
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['total_segment_actual_time'], kde=True)
+sns.histplot(df_agg2['total_actual_time'], kde=True)
+
+
+[ ]
+df_agg2[['total_segment_actual_time','total_actual_time']].corr()
+
+
+[ ]
+# Wilcoxon Signed-Rank Test
+# H0: The median difference between paired samples is zero.
+# H1: The median difference between paired samples is not zero.
+
+# The Wilcoxon Signed-Rank test is used for paired non-normally distributed data.
+# 'total_actual_time' and 'total_segment_actual_time' are paired for each trip.
+
+wilcoxon_test_segment = stats.wilcoxon(df_agg2['total_actual_time'], df_agg2['total_segment_actual_time'])
+
+print(f"Wilcoxon Signed-Rank Test comparing Total Actual Time and Total Segment Actual Time:")
+print(f"Test Statistic={wilcoxon_test_segment.statistic:.4f}, p-value={wilcoxon_test_segment.pvalue:.4f}")
+
+# Interpretation of Wilcoxon test:
+alpha = 0.05
+if wilcoxon_test_segment.pvalue < alpha:
+    print("\nConclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total Actual Time and Total Segment Actual Time.")
+else:
+    print("\nConclusion: Fail to reject the null hypothesis. There is no statistically significant difference in the medians of Total Actual Time and Total Segment Actual Time.")
+Wilcoxon Signed-Rank Test comparing Total Actual Time and Total Segment Actual Time:
+Test Statistic=0.0000, p-value=0.0000
+
+Conclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total Actual Time and Total Segment Actual Time.
+Insight from Wilcoxon Signed-Rank Test:
+The Wilcoxon Signed-Rank Test comparing the aggregated total_actual_time and total_segment_actual_time revealed a statistically significant difference (p-value < 0.05). This indicates that there is a significant difference in the central tendency (median) between the actual time taken for trips and the sum of the segment actual times, when considering each trip as a paired observation of these two time measures.
+
+Do hypothesis testing/ visual analysis between osrm distance aggregated value and segment osrm distance aggregated value (aggregated values are the values you’ll get after merging the rows on the basis of trip_uuid)
+
+[ ]
+# Aggregate osrm_distance and segment_osrm_distance by trip_uuid
+df_agg_distance = df_delhivery.groupby('trip_uuid').agg(
+    total_osrm_distance=('osrm_distance', 'median'),
+    total_segment_osrm_distance=('segment_osrm_distance', 'median')
+).reset_index()
+
+# Drop existing aggregated distance columns from df_agg2 if they exist
+df_agg2 = df_agg2.drop(columns=['total_osrm_distance', 'total_segment_osrm_distance'], errors='ignore')
+
+
+# Merge the aggregated distance data into df_agg2
+df_agg2 = pd.merge(df_agg2, df_agg_distance, on='trip_uuid', how='left')
+
+print("\nDataFrame df_agg2 with aggregated osrm_distance and segment_osrm_distance:")
+display(df_agg2.head())
+
+
+# Correlation Analysis
+correlation_distance = df_agg2[['total_osrm_distance', 'total_segment_osrm_distance']].corr()
+print("\nCorrelation Matrix:")
+display(correlation_distance)
+
+
+
+
+[ ]
+# Visualize the distribution of total_segment_osrm_distance
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['total_segment_osrm_distance'], kde=True)
+plt.title('Distribution of Total Segment OSRM Distance (Aggregated by Trip)')
+plt.xlabel('Total Segment OSRM Distance')
+plt.ylabel('Frequency')
+plt.show()
+
+
+[ ]
+# Wilcoxon Signed-Rank Test
+# H0: The median difference between paired samples is zero.
+# H1: The median difference between paired samples is not zero.
+
+# The Wilcoxon Signed-Rank test is used for paired non-normally distributed data.
+# 'total_osrm_distance' and 'total_segment_osrm_distance' are paired for each trip.
+
+wilcoxon_test_distance = stats.wilcoxon(df_agg2['total_osrm_distance'], df_agg2['total_segment_osrm_distance'])
+
+print(f"Wilcoxon Signed-Rank Test comparing Total OSRM Distance and Total Segment OSRM Distance:")
+print(f"Test Statistic={wilcoxon_test_distance.statistic:.4f}, p-value={wilcoxon_test_distance.pvalue:.4f}")
+
+# Interpretation of Wilcoxon test:
+alpha = 0.05
+if wilcoxon_test_distance.pvalue < alpha:
+    print("\nConclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total OSRM Distance and Total Segment OSRM Distance.")
+else:
+    print("\nConclusion: Fail to reject the null hypothesis. There is no statistically significant difference in the medians of Total OSRM Distance and Total Segment OSRM Distance.")
+Wilcoxon Signed-Rank Test comparing Total OSRM Distance and Total Segment OSRM Distance:
+Test Statistic=26845.0000, p-value=0.0000
+
+Conclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total OSRM Distance and Total Segment OSRM Distance.
+Insight from Wilcoxon Signed-Rank Test:
+The Wilcoxon Signed-Rank Test comparing the aggregated total_osrm_distance and total_segment_osrm_distance revealed a statistically significant difference (p-value < 0.05). This indicates that there is a significant difference in the central tendency (median) between the total distance estimated by the OSRM algorithm and the sum of the segment OSRM distances, when considering each trip as a paired observation of these two distance measures.
+
+Do hypothesis testing/ visual analysis between osrm time aggregated value and segment osrm time aggregated value (aggregated values are the values you’ll get after merging the rows on the basis of trip_uuid)
+
+[ ]
+# Aggregate segment_osrm_time by trip_uuid
+df_agg_segment_osrm_time = df_delhivery.groupby('trip_uuid').agg(
+    total_segment_osrm_time=('segment_osrm_time', 'median')
+).reset_index()
+
+# Drop existing aggregated time columns from df_agg2 if they exist
+df_agg2 = df_agg2.drop(columns=['total_segment_osrm_time'], errors='ignore')
+
+
+# Merge the aggregated segment osrm time data into df_agg2
+df_agg2 = pd.merge(df_agg2, df_agg_segment_osrm_time, on='trip_uuid', how='left')
+
+print("\nDataFrame df_agg2 with aggregated segment_osrm_time:")
+display(df_agg2.head())
+
+
+[ ]
+# Correlation Analysis
+correlation_distance = df_agg2[['total_osrm_time', 'total_segment_osrm_time']].corr()
+print("\nCorrelation Matrix:")
+display(correlation_distance)
+
+
+[ ]
+# Visual Analysis: Histograms
+plt.figure(figsize=(10, 5))
+sns.histplot(df_agg2['total_osrm_time'], kde=True, label='total_osrm_time')
+sns.histplot(df_agg2['total_segment_osrm_time'], kde=True, label='total_segment_osrm_time')
+plt.title('Distribution of Total OSRM Time vs. Total Segment OSRM Time')
+plt.xlabel('Time')
+plt.ylabel('Frequency')
+plt.legend()
+plt.show()
+
+
+[ ]
+# Wilcoxon Signed-Rank Test
+# H0: The median difference between paired samples is zero.
+# H1: The median difference between paired samples is not zero.
+
+# The Wilcoxon Signed-Rank test is used for paired non-normally distributed data.
+# 'total_osrm_time' and 'total_segment_osrm_time' are paired for each trip.
+
+wilcoxon_test_osrm_time = stats.wilcoxon(df_agg2['total_osrm_time'], df_agg2['total_segment_osrm_time'])
+
+print(f"Wilcoxon Signed-Rank Test comparing Total OSRM Time and Total Segment OSRM Time:")
+print(f"Test Statistic={wilcoxon_test_osrm_time.statistic:.4f}, p-value={wilcoxon_test_osrm_time.pvalue:.4f}")
+
+# Interpretation of Wilcoxon test:
+alpha = 0.05
+if wilcoxon_test_osrm_time.pvalue < alpha:
+    print("\nConclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total OSRM Time and Total Segment OSRM Time.")
+else:
+    print("\nConclusion: Fail to reject the null hypothesis. There is no statistically significant difference in the medians of Total OSRM Time and Total Segment OSRM Time.")
+Wilcoxon Signed-Rank Test comparing Total OSRM Time and Total Segment OSRM Time:
+Test Statistic=28986.0000, p-value=0.0000
+
+Conclusion: Reject the null hypothesis. There is a statistically significant difference in the medians of Total OSRM Time and Total Segment OSRM Time.
+Insight from Wilcoxon Signed-Rank Test:
+The Wilcoxon Signed-Rank Test comparing the aggregated total_osrm_time and total_segment_osrm_time revealed a statistically significant difference (p-value < 0.05). This indicates that there is a significant difference in the central tendency (median) between the total time estimated by the OSRM algorithm and the sum of the segment OSRM times, when considering each trip as a paired observation of these two time measures.
+
+Find outliers in the numerical variables (you might find outliers in almost all the variables), and check it using visual analysis
+
+[ ]
+# Identify numerical columns in the DataFrame
+numerical_cols = df_delhivery.select_dtypes(include=np.number).columns.tolist()
+
+# Find outliers using the IQR method and count them for each numerical column
+outlier_counts = {}
+for col in numerical_cols:
+    Q1 = df_delhivery[col].quantile(0.25)
+    Q3 = df_delhivery[col].quantile(0.75)
+    IQR = Q3 - Q1
+
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    outliers = df_delhivery[(df_delhivery[col] < lower_bound) | (df_delhivery[col] > upper_bound)]
+    outlier_counts[col] = len(outliers)
+
+print("Number of outliers in each numerical column (IQR method):")
+for col, count in outlier_counts.items():
+    print(f"{col}: {count} ({count/len(df_delhivery)*100:.2f}%)")
+Number of outliers in each numerical column (IQR method):
+start_scan_to_end_scan: 373 (0.26%)
+actual_distance_to_destination: 17992 (12.42%)
+actual_time: 16633 (11.48%)
+osrm_time: 17603 (12.15%)
+osrm_distance: 17816 (12.30%)
+segment_actual_time: 9298 (6.42%)
+segment_osrm_time: 6378 (4.40%)
+segment_osrm_distance: 4315 (2.98%)
+trip_year: 0 (0.00%)
+trip_month: 17518 (12.09%)
+trip_day: 0 (0.00%)
+trip_dayofweek: 0 (0.00%)
+trip_hour: 0 (0.00%)
+trip_minute: 0 (0.00%)
+trip_second: 0 (0.00%)
+trip_weekofyear: 0 (0.00%)
+trip_quarter: 17518 (12.09%)
+od_duration: 373 (0.26%)
+
+[ ]
+# Visualize potential outliers using violin plots for a few numerical columns
+# Violin plots show the distribution shape and can also indicate outliers.
+
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 3, 1)
+sns.violinplot(y='actual_distance_to_destination', data=df_delhivery)
+plt.title('Violin Plot of Actual Distance')
+plt.ylabel('Actual Distance')
+
+plt.subplot(1, 3, 2)
+sns.violinplot(y='actual_time', data=df_delhivery)
+plt.title('Violin Plot of Actual Time')
+plt.ylabel('Actual Time')
+
+plt.subplot(1, 3, 3)
+sns.violinplot(y='od_duration', data=df_delhivery)
+plt.title('Violin Plot of OD Duration')
+plt.ylabel('OD Duration')
+
+plt.tight_layout()
+plt.show()
+
+Insights from Violin Plots (Outlier Analysis):
+The violin plots provide a visual representation of the distribution shapes of the numerical variables and further highlight the presence of potential outliers.
+
+The wider sections of the violin plots show where the majority of the data lies, while the thinner sections and the individual points extending beyond the main body indicate the presence of outliers.
+For columns like actual_distance_to_destination, actual_time, and od_duration, the violin plots clearly show a dense concentration of data at lower values and a long tail extending towards higher values, visually confirming the right-skewness and the presence of significant outliers that were also observed in the box plots and scatter plots.
+The shape of the violin plots reinforces the earlier finding from the Shapiro-Wilk test that these distributions are not normal.
+The violin plots, in conjunction with box plots and scatter plots, offer a comprehensive visual understanding of the spread and the location of extreme values in the numerical features.
+Handle the outliers using the IQR method.
+
+[ ]
+
+numerical_cols = df_delhivery.select_dtypes(include=np.number).columns.tolist()
+
+for col in numerical_cols:
+    Q1 = df_delhivery[col].quantile(0.25)
+    Q3 = df_delhivery[col].quantile(0.75)
+    IQR = Q3 - Q1
+
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    # Cap the outliers
+    df_delhivery[col] = df_delhivery[col].clip(lower=lower_bound, upper=upper_bound)
+
+print("Outliers handled for numerical columns using IQR capping.")
+Outliers handled for numerical columns using IQR capping.
+
+[ ]
+# Visualize the distributions after handling outliers using violin plots
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 3, 1)
+sns.violinplot(y='actual_distance_to_destination', data=df_delhivery)
+plt.title('Violin Plot of Actual Distance (Outliers Handled)')
+plt.ylabel('Actual Distance')
+
+plt.subplot(1, 3, 2)
+sns.violinplot(y='actual_time', data=df_delhivery)
+plt.title('Violin Plot of Actual Time (Outliers Handled)')
+plt.ylabel('Actual Time')
+
+plt.subplot(1, 3, 3)
+sns.violinplot(y='od_duration', data=df_delhivery)
+plt.title('Violin Plot of OD Duration (Outliers Handled)')
+plt.ylabel('OD Duration')
+
+plt.tight_layout()
+plt.show()
+
+Do one-hot encoding of categorical variables (like route_type)
+
+[ ]
+df_new=pd.get_dummies(df_delhivery,columns=['data'],drop_first='True')
+df_new.head()
+
+Insights on One-Hot Encoding of Categorical Variables
+One-hot encoding is a crucial technique for preparing categorical data for use in many machine learning algorithms. Here's why it's important and what it achieves:
+
+Numerical Representation: Machine learning models typically work with numerical data. Categorical variables, like route_type (which can be 'Carting' or 'FTL'), are non-numerical. One-hot encoding converts these categories into a numerical format.
+Avoiding Ordinal Misinterpretation: Simply assigning numerical labels (e.g., 0 for 'Carting', 1 for 'FTL') would imply an ordinal relationship (that 'FTL' is "greater than" 'Carting'), which is not the case here. One-hot encoding avoids this by creating a new binary column for each unique category. For route_type, this results in a column like route_type_FTL (if 'Carting' is the base, dropped category), where a '1' indicates the trip is of type 'FTL' and '0' indicates it's not (meaning it's 'Carting').
+Equal Weighting: Each category is represented by a separate binary feature, giving each category equal weight in the model.
+Compatibility with Algorithms: Many algorithms (like linear models, support vector machines, neural networks) require numerical input and perform better when categorical variables are one-hot encoded.
+In summary, one-hot encoding transforms categorical features into a format that machine learning models can understand and process effectively, preventing misinterpretations and ensuring that the model can leverage the information contained in these categories.
+
+Normalize/ Standardize the numerical features using MinMaxScaler or StandardScaler.
+
+[ ]
+# Identify numerical columns for scaling (excluding the one-hot encoded column)
+# Assuming 'route_type_FTL' is the only one-hot encoded column and it's boolean
+numerical_cols_for_scaling = df_delhivery.select_dtypes(include=np.number).columns.tolist()
+if 'route_type_FTL' in numerical_cols_for_scaling:
+    numerical_cols_for_scaling.remove('route_type_FTL')
+
+
+# Initialize StandardScaler
+scaler = StandardScaler()
+
+# Apply StandardScaler to the numerical columns
+df_delhivery[numerical_cols_for_scaling] = scaler.fit_transform(df_delhivery[numerical_cols_for_scaling])
+
+print("\nDataFrame head after standardization:")
+display(df_delhivery.head())
+
+print("\nDataFrame info after standardization:")
+df_delhivery.info()
+
+
+[ ]
+# Visualize the distribution of some numerical features after standardization
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 3, 1)
+sns.histplot(df_delhivery['actual_distance_to_destination'], kde=True)
+plt.title('Distribution of Standardized Actual Distance')
+plt.xlabel('Standardized Value')
+plt.ylabel('Frequency')
+
+plt.subplot(1, 3, 2)
+sns.histplot(df_delhivery['actual_time'], kde=True)
+plt.title('Distribution of Standardized Actual Time')
+plt.xlabel('Standardized Value')
+plt.ylabel('Frequency')
+
+plt.subplot(1, 3, 3)
+sns.histplot(df_delhivery['od_duration'], kde=True)
+plt.title('Distribution of Standardized OD Duration')
+plt.xlabel('Standardized Value')
+plt.ylabel('Frequency')
+
+plt.tight_layout()
+plt.show()
+
+Insights from Normalization/Standardization:
+Applying StandardScaler to the numerical features has resulted in the following:
+
+The distributions of the numerical variables are now centered around zero and have a standard deviation of one. This is confirmed by the histograms, which show the peak of the distribution at or near zero.
+This transformation is crucial for many machine learning algorithms that are sensitive to the scale and distribution of input features, such as those based on distance metrics (e.g., K-Nearest Neighbors, Support Vector Machines) or those that assume normally distributed data (e.g., Linear Regression, Logistic Regression with regularization).
+While standardization changes the scale and center of the distribution, it does not change the shape of the distribution. If the original data was skewed or had outliers (even after handling), the standardized data will still exhibit that skewness or the effect of the outlier handling.
+Standardization is an important step in preparing the data for modeling, ensuring that no single feature dominates the learning process simply because of its larger magnitude.
+Business Recommendations for Delhivery
+Based on the analysis of the delivery data, the following recommendations can be considered to optimize operations and improve efficiency:
+
+Investigate Discrepancies in Time and Distance Estimates:
+
+The analysis showed a statistically significant difference between actual trip times and OSRM estimated times, as well as between OSRM distances and aggregated segment OSRM distances.
+Recommendation: Conduct a deeper investigation into the root causes of these discrepancies. This could involve analyzing external factors like traffic congestion, road conditions, route deviations, or issues with the OSRM algorithm itself in certain areas or during specific times. Identifying and addressing these factors can lead to more accurate time and distance estimations, improving planning and customer communication.
+Optimize Routes and Schedules:
+
+Analyzing the distribution of trips by time of day, day of the week, and month can help identify peak periods and potentially congested routes.
+Recommendation: Use the insights from the time-based analysis to optimize route planning and scheduling. This might involve adjusting departure times, considering alternative routes during peak hours, or allocating more resources during busy periods to minimize delays.
+Refine Location-Based Strategies:
+
+The analysis of source and destination locations can reveal high-traffic areas or locations with consistent delays.
+Recommendation: Develop location-specific strategies to improve efficiency. This could include setting up micro-fulfillment centers in high-demand areas, optimizing last-mile delivery routes, or collaborating with local authorities to address infrastructure issues contributing to delays.
+Enhance OSRM Integration and Calibration:
+
+The observed differences between OSRM estimates and actuals highlight potential areas for improvement in the OSRM integration or calibration.
+Recommendation: Work on refining the OSRM integration by incorporating real-time data (e.g., live traffic updates) and calibrating the algorithm based on historical performance data for specific routes and conditions. This can lead to more dynamic and accurate route planning.
+Utilize Data for Predictive Analytics:
+
+The engineered features and the insights gained from the analysis can be used to build predictive models for trip duration or potential delays.
+Recommendation: Develop and deploy predictive models to estimate delivery times more accurately. This can help in providing more reliable estimated times of arrival (ETAs) to customers, improving customer satisfaction, and enabling proactive management of potential delays.
+Continuous Monitoring and Evaluation:
+
+The logistics landscape is dynamic.
+Recommendation: Implement a system for continuous monitoring of key metrics (actual vs. estimated times/distances, trip durations, on-time delivery rates) and regular evaluation of the effectiveness of implemented recommendations. This iterative process will help in continuously improving operations and adapting to changing conditions.
+Colab paid products - Cancel contracts here
